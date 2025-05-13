@@ -1,0 +1,38 @@
+This query returns all transactions sent from our uploaded EOA wallet list since Jan 01, 2024, excluding smart contract senders. 
+
+
+
+-- a list of our own wallets
+WITH target_wallets AS (
+  SELECT LOWER(wallet) AS address
+  FROM `peak-castle-455015-k4.wallet_address.target_wallets` 
+),
+
+-- smart contracts
+contracts AS (
+  SELECT DISTINCT LOWER(to_address) AS address
+  FROM `bigquery-public-data.crypto_ethereum.traces`
+  WHERE call_type = 'create' AND to_address IS NOT NULL
+),
+
+-- specify the date
+txs AS (
+  SELECT
+    block_timestamp,
+    LOWER(from_address) AS from_address,
+    LOWER(to_address) AS to_address,
+    value,
+    gas,
+    gas_price
+  FROM `bigquery-public-data.crypto_ethereum.transactions`
+  WHERE block_timestamp >= TIMESTAMP("2024-01-01")
+)
+
+SELECT
+  t.*
+FROM txs t
+JOIN target_wallets tw
+  ON t.from_address = tw.address
+LEFT JOIN contracts c
+  ON t.from_address = c.address
+WHERE c.address IS NULL
