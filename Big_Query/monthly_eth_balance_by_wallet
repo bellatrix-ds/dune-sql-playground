@@ -1,0 +1,72 @@
+Returns monthly ETH balance and transaction count for your uploaded wallet list since January 2024.
+
+-- Step 0:
+WITH target_wallets AS (
+  SELECT LOWER(wallet) AS address
+  FROM `peak-castle-455015-k4.wallet_address.target_wallets` 
+),
+
+-- Step 1: 
+txs AS (
+  SELECT
+    LOWER(from_address) AS from_address,
+    LOWER(to_address) AS to_address,
+    value / 1e18 AS eth_value,
+    block_timestamp,
+    FORMAT_TIMESTAMP('%Y-%m', block_timestamp) AS month
+  FROM `bigquery-public-data.crypto_ethereum.transactions`
+  WHERE block_timestamp > '2024-01-01'
+),
+
+-- Step 2: 
+flows AS (
+  SELECT
+    month,
+    address,
+    SUM(received) AS received_eth,
+    SUM(sent) AS sent_eth,
+    COUNTIF(sent > 0) + COUNTIF(received > 0) AS tx_count
+  FROM (
+    SELECT
+      month,
+      to_address AS address,
+      eth_value AS received,
+      0 AS sent
+    FROM txs
+    WHERE LOWER(to_address) IN (SELECT address FROM target_wallets)
+
+    UNION ALL
+
+    SELECT
+      month,
+      from_address AS address,
+      0 AS received,
+      eth_value AS sent
+    FROM txs
+    WHERE LOWER(from_address) IN (SELECT address FROM target_wallets)
+  )
+  GROUP BY month, address
+),
+
+-- Step 3: 
+wallet_balances AS (
+  SELECT
+    month,
+    address,
+    SUM(received_eth - sent_eth) OVER (
+      PARTITION BY address
+      ORDER BY month
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS cumulative_balance_eth,
+    tx_count
+  FROM flows
+)
+
+-- Step 4: 
+SELECT
+  month,
+  address AS wallet_address,
+  ROUND(cumulative_balance_eth, 6) AS eth_balance,
+  tx_count
+FROM wallet_balances
+ORDER BY wallet_address, month
