@@ -1,0 +1,51 @@
+This query returns the top 10 wallet-to-wallet interactions (excluding contracts) for our uploaded addresses in Jan 2024.
+
+
+-- Step 0: 
+WITH target_wallets AS (
+  SELECT LOWER(wallet) AS wallet
+  FROM `peak-castle-455015-k4.wallet_address.target_wallets` 
+),
+
+-- Step 1: 
+contracts AS (
+  SELECT LOWER(address) AS contract_address
+  FROM `bigquery-public-data.crypto_ethereum.contracts`
+),
+
+-- Step 2: 
+txs AS (
+  SELECT
+    LOWER(from_address) AS sender,
+    LOWER(to_address) AS receiver
+  FROM `bigquery-public-data.crypto_ethereum.transactions`
+  WHERE block_timestamp > '2024-01-01'
+),
+
+-- Step 3: 
+eoa_interactions AS (
+  SELECT
+    sender AS wallet,
+    receiver AS counterparty
+  FROM txs
+  WHERE sender NOT IN (SELECT contract_address FROM contracts)
+    AND receiver NOT IN (SELECT contract_address FROM contracts)
+    AND sender IN (SELECT wallet FROM target_wallets)
+),
+
+-- Step 4:
+ranked_interactions AS (
+  SELECT
+    wallet,
+    counterparty,
+    COUNT(*) AS tx_count,
+    ROW_NUMBER() OVER (PARTITION BY wallet ORDER BY COUNT(*) DESC) AS rnk
+  FROM eoa_interactions
+  GROUP BY wallet, counterparty
+)
+
+-- Step 5: 
+SELECT *
+FROM ranked_interactions
+WHERE rnk <= 10
+ORDER BY wallet, tx_count DESC
