@@ -1,0 +1,44 @@
+This query shows a list of number of transactions, fist date transaction, last date transaction and last eth balance for each wallet, 
+which we specify through another table already.
+
+
+-- Step 0: Read list of our own wallet list
+WITH target_wallets AS (
+  SELECT wallet AS address
+  FROM `peak-castle-455015-k4.wallet_address.target_wallets` 
+),
+
+-- Step 1: List of all smart contracts
+contract_addresses AS (
+  SELECT DISTINCT LOWER(to_address) AS address
+  FROM `bigquery-public-data.crypto_ethereum.traces`
+  WHERE call_type = 'create' AND to_address IS NOT NULL
+),
+-- Step 2: List of EOA which had transactions
+active_wallets AS (
+  SELECT
+    LOWER(from_address) AS address,
+    COUNT(*) AS tx_count,
+    MIN(block_timestamp) AS first_tx,
+    MAX(block_timestamp) AS last_tx
+  FROM `bigquery-public-data.crypto_ethereum.transactions`
+  WHERE block_timestamp >= TIMESTAMP("2024-01-01")
+  GROUP BY from_address
+)
+
+-- Step 3: Exclude smart contracts
+SELECT
+  a.address,
+  a.tx_count,
+  a.first_tx,
+  a.last_tx,
+  b.eth_balance
+FROM active_wallets a
+JOIN target_wallets t
+  ON a.address = t.address
+LEFT JOIN contract_addresses c
+  ON a.address = c.address
+JOIN `bigquery-public-data.crypto_ethereum.balances` b
+  ON a.address = b.address
+WHERE c.address IS NULL  
+ORDER BY tx_count DESC;
