@@ -1,0 +1,44 @@
+This query returns the top 10 contract interactions for each wallet in our uploaded list during Jan 2024.
+
+WITH target_wallets AS (
+  SELECT (wallet) AS wallet
+  FROM `peak-castle-455015-k4.wallet_address.target_wallets` 
+),
+
+contracts AS (
+  SELECT LOWER(address) AS contract_address
+  FROM `bigquery-public-data.crypto_ethereum.contracts`
+),
+
+txs AS (
+  SELECT
+    LOWER(from_address) AS sender,
+    LOWER(to_address) AS receiver
+  FROM `bigquery-public-data.crypto_ethereum.transactions`
+  WHERE block_timestamp > '2024-01-01'
+),
+
+eoa_to_contract AS (
+  SELECT
+    sender AS wallet,
+    receiver AS contract
+  FROM txs
+  WHERE sender NOT IN (SELECT contract_address FROM contracts)
+    AND receiver IN (SELECT contract_address FROM contracts)
+    AND sender IN (SELECT wallet FROM target_wallets)
+),
+
+ranked_contracts AS (
+  SELECT
+    wallet,
+    contract,
+    COUNT(*) AS tx_count,
+    ROW_NUMBER() OVER (PARTITION BY wallet ORDER BY COUNT(*) DESC) AS rnk
+  FROM eoa_to_contract
+  GROUP BY wallet, contract
+)
+
+SELECT *
+FROM ranked_contracts
+WHERE rnk <= 10
+ORDER BY wallet, tx_count DESC
